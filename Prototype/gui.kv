@@ -1,0 +1,70 @@
+## There is no error here, it wants a statment about kivy but that causes it to crash
+#import Factory kivy.factory.Factory
+
+<MyLayout>
+    id: my_layout
+
+    BoxLayout:
+        orientation: "vertical"
+        size: root.width, root.height
+        padding: 20
+        spacing: 20
+
+        MDLabel:
+            id: filename
+            text: ""
+            halign: "center"
+
+        MDLabel:
+            text: "Choose an X-ray Image to upload for image pre-processing :)"
+            font_size: 36
+            halign: "center"
+
+            
+        MDRaisedButton:
+
+            text: "Upload"
+            pos_hint: {"center_x":0.5, "center_y":0.3}
+            on_release: root.choose_file()
+            
+        
+        MDRaisedButton:
+            text: "Exit"
+            pos_hint: {"center_x":0.5,"center_y":0.2}
+            on_release: exit()
+            background_color: (42/255,71/255,115/255,0)
+
+        Widget:
+
+    BoxLayout:
+        orientation: "vertical"
+        size: root.width, root.height
+        padding: 20
+        spacing: 20
+
+        MDLabel:
+            text: ""
+            halign: "center"
+        
+        MDLabel:
+            id: filename
+            text: ""
+            halign: "center"
+
+        Image:
+			source: ''
+			allow_stretch: True
+			keep_ratio: True
+            id: imageView
+            width: 1
+            height: 1
+            
+
+        MDLabel:
+            text: ""
+            halign: "center"
+        
+        # MDRaisedButton:
+        #     text: "Contour"
+        #     pos_hint: {"center_x":0.5, "center_y":0.3}
+        #     on_release: root.displayContourImage()

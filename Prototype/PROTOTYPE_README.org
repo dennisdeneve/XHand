@@ -1,0 +1,238 @@
+#+title: Prototype
+#+options: ^:{}
+#+property: header-args :tangle Prototype/xhand.py
+#+auto_tangle: true
+
+* Packages
++ Numpy
++ OpenCV
+
+* Hand x-ray image pre-processing  [XHAND]
++ A set of images where provided in PNG format.
++ We used python for this project.
++ imageio is used to read and display the images.
+
+* Imports
+#+begin_src python :session
+import sys
+import os
+import random
+
+from enum import Enum
+import imageio.v3 as imgio
+import cv2 as cv
+import numpy as np
+
+#+end_src
+
+* Final Variables
+#+begin_src python :session
+IMAGES="../images/"
+#+end_src
+
+** Enum Class
++ Prevents the error of mispelling.
+*** Batch class
+#+begin_src python :session
+class Batch(Enum):
+    ONE = "batch1"
+    TWO = "batch2"
+#+end_src
+
+*** Color Class
+#+begin_src python :session
+class RGBColor(Enum):
+    RED     = (0, 0, 255)
+    GREEN   = (0, 255, 0)
+    BLUE    = (255, 0, 0)
+    BRIGHT_TEAL = (0, 181, 184)
+#+end_src
+
+
+** Get image from image folder.
+#+begin_src  python :session :results output text
+def getRandomImagePath(batch :Batch = Batch.ONE) -> str:
+    "Gets a random image from batch 1 if batch is not specified."
+    return IMAGES+batch.value+"/"+random.choice(os.listdir(IMAGES+batch.value))
+
+#+end_src
+*** TODO Find a way to make this return the actual first element.
+#+begin_src  python :session :results output text
+def getImagePath(batch: str=Batch.ONE, index: int=0) -> str:
+    "Gets the first image from batch 1 if batch and index are not specified."
+    return IMAGES+batch.value+"/"+os.listdir(IMAGES+batch.value)[index]
+
+#+end_src
+* Segmenting and aligning the image.
++ We use python binding for OpenCV for this.
+
+** Image Class
+*** 1. Read in images
+#+begin_src python :session
+class Xhand:
+    def __init__(self, path: str = getRandomImagePath()):
+        self.pure_image = cv.imread(path)
+
+    def getOriginal(self) -> np.ndarray:
+        return self.pure_image
+
+    def getShape(self):
+        return self.pure_image.shape
+
+#+end_src
+
+** 1a. Histogram normalization.
++ This is a process of adjusting the contrast of an image using the image's histogram.
++ In this project, we want to make sure that the background is very dark and the foreground is very bright, i.e intensify values of pixels in a this image.
++ This is done with the help of OpenCV's normalize function.
+#+begin_src  python :session :results output text
+    def normalizeContrast(self) -> np.ndarray:
+        """Takes in an image read by cv2.imread(path, 0) or imageio.imread(path)
+        Changes the contrast by making sure the background is very dark and
+        the foreground is very bright"""
+        return cv.normalize(self.pure_image, np.zeros(self.pure_image.shape), 0, 255, cv.NORM_MINMAX)
+
+#+end_src
+
+** 2. Thresholding the image.
++ This is so that we create a *binary image* (black(0) below threshold, white(255) above)
++ *Thresholding* is the simplest method of *segmenting images*.
++ Using a threshold that will keep all the hand/anatomy, as well as the background clutter.
+*** TODO Experiment with adaptive thresholding schemes.
+*** TODO Look at the way openCV represents image types to make sure to use the right kind
+#+begin_src  python :session :results output text
+    def getBinary(self, threshold_value: int = 23) -> np.ndarray:
+        """
+        This returns a binary image after performing thresholding.
+        Threshold value is the value used to classify the pixel values.
+        """
+        img_grayscale = cv.cvtColor(self.pure_image, cv.COLOR_BGR2GRAY)
+        threshold, binaryImg = cv.threshold(img_grayscale, threshold_value, 255, cv.THRESH_BINARY, dst=np.zeros(self.getShape()))
+        return binaryImg
+
+#+end_src
+
+** 3. Connected Components Analysis
++ Aka, Connected Components Labeling, blob extraction, region labeling.
++ Running the connected components analysis on the thresholded binary image.
++ @wikipedia: This is an algorithmic application of graph theory, where subsets of connected components are uniquely labeled based on a given heuristic.
++ This analysis is used to detect connected regions in binary digital images.
+  + And to filter out regions
++ Connected components are also used in the same situations where contours are used.
++ However, connected components analysis can give more granular filtering of the blobs in a binary image.
++ The use of *connectedComponentsWithStats* may cause a bottle neck in terms of performance
++ TODO research on how to use connectedComponentsWithStatsWithAlgorithm instead
+
+#+begin_src  python :session :results output text
+    def runBlobEtraction(self, connect:int = 4):
+       """ returns (labelsCount, label_ids, stats, centroids)"""
+       return cv.connectedComponentsWithStats(self.getBinary(), connect, cv.CV_32S)
+#+end_src
+
+** 4. Extract the largest component
++ This should be the hand, since it has the most pixels.
+
+#+begin_src python :session
+    def getStatArea(self, stats):
+        return stats[1][cv.CC_STAT_AREA]
+
+    def getLargerstCC(self):
+        labelsCount, label_ids, stats, centroids = self.runBlobEtraction()
+        label, stat = max(enumerate(stats[1:], 1), key=self.getStatArea)
+        return np.uint8(label_ids == label)*255
+
+#+end_src
+
+** 5. Extract Hand Contour
+#+begin_src python :session
+    def extractContours(self, threshold_value: int = 23):
+        ret, thresh = cv.threshold(self.getLargerstCC(), threshold_value, 255, 0)
+        contours, heirarchy = cv.findContours(thresh, cv.RETR_TREE, cv.CHAIN_APPROX_NONE)
+        return contours
+
+    def getWithContours(self, contorColor: RGBColor = RGBColor.BRIGHT_TEAL, indexOfContours: int = -1):
+        newImage = self.getOriginal().copy()
+
+        cv.drawContours(newImage, self.extractContours(), indexOfContours, contorColor.value, 2)
+        return newImage
+
+#+end_src
+
+** 9. Convex Hull
++ This gives us a polygon that fits the hand as tightly as possible.
++ The vertices this will include the fingertip points (roughly).
++ TODO:
+
+*** Get Convex Hull
+#+begin_src  python :session :results output text
+    def getConvexHull(self, returnPoints=True):
+        hull = []
+        contours = self.extractContours()
+
+        for i in range(len(contours)):
+            hull.append(cv.convexHull(contours[i], returnPoints))
+
+        return hull
+#+end_src
+*** Return image with convex hall
+#+begin_src  python :session :results output text
+    def getWithConvexHull(self, hullColor: RGBColor = RGBColor.BLUE):
+        newImage = self.getWithContours()
+        hull = self.getConvexHull()
+        contours = self.extractContours()
+
+        for i in range(len(contours)):
+            cv.drawContours(newImage, hull,i,hullColor.value, 1, 8)
+
+        return newImage
+
+#+end_src
+
+** 10. Convexity Defects
++ These are points on the contour which correspond to place the boundary is very concave.
++ Such as where the fingers join the palm.
+#+begin_src  python :session :results output text
+    def getWithConvexityDefects(self, defectsColor: RGBColor = RGBColor.RED):
+        contours = self.extractContours()
+        points = []
+        convexHulled = self.getWithConvexHull()
+
+        for i in range(len(contours)):
+            conv = cv.convexHull(contours[i], returnPoints=False)
+            defects = cv.convexityDefects(contours[i], conv)
+            if type(defects) != type(None):
+                for j in range(defects.shape[0]):
+                    try:
+                        s,e,f,d = defects[j][0]
+                        far = tuple(contours[i][f][0])
+                        points.append(far)
+                    except IndexError:
+                        pass
+
+        for point in points:
+            cv.drawMarker(convexHulled, point, defectsColor.value, cv.MARKER_SQUARE)
+        return convexHulled
+
+#+end_src
+
+** Draw orginal vs processed
+#+begin_src  python :session :results output text
+def draw(processed: np.ndarray, original: np.ndarray = np.array([])) -> None:
+    if  original.size == 0:
+        cv.imshow("Processed", processed)
+    else:
+        stack = np.hstack((original, processed))
+        cv.imshow("Processed", stack)
+    cv.waitKey(0)
+    cv.destroyAllWindows()
+#+end_src
+
+* Main method for testing
+#+begin_src  python :session :results output text
+#try:
+#    xImage = Xhand()
+#    res = xImage.runBlobEtraction()
+#    draw(xImage.getWithConvexityDefects())
+#except Exception:
+#    CONSOLE.print_exception(show_locals=True)
+#+end_src
